@@ -1,11 +1,11 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Send } from "lucide-react"
+import { Send, Loader2 } from "lucide-react"
 import StreamingAvatar, {
   AvatarQuality,
   StreamingEvents,
@@ -16,10 +16,18 @@ export default function ChatInterface() {
   const [input, setInput] = useState("")
   const [avatar, setAvatar] = useState<StreamingAvatar | null>(null)
   const [sessionData, setSessionData] = useState<any>(null)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [isInitializing, setIsInitializing] = useState(false)
+  
+  // Handle avatar start talking event
+  const handleAvatarStartTalking = useCallback(() => {
+    setIsProcessing(false)
+  }, [])
 
   // Initialize streaming avatar session
   async function initializeAvatarSession() {
     try {
+      setIsInitializing(true); // Start loading
       const apiKey = process.env.NEXT_PUBLIC_HEYGEN_API_KEY;
       const response = await fetch(
         "https://api.heygen.com/v1/streaming.create_token",
@@ -35,6 +43,7 @@ export default function ChatInterface() {
 
       newAvatar.on(StreamingEvents.STREAM_READY, handleStreamReady);
       newAvatar.on(StreamingEvents.STREAM_DISCONNECTED, handleStreamDisconnected);
+      newAvatar.on(StreamingEvents.AVATAR_START_TALKING, handleAvatarStartTalking);
 
       const newSessionData = await newAvatar.createStartAvatar({
         quality: AvatarQuality.Medium,
@@ -47,6 +56,7 @@ export default function ChatInterface() {
 
     } catch (error) {
       console.error("Failed to initialize avatar session:", error);
+      setIsInitializing(false); // Stop loading on error
     }
   }
 
@@ -58,8 +68,10 @@ export default function ChatInterface() {
       videoElement.onloadedmetadata = () => {
         videoElement.play().catch(console.error);
       };
+      setIsInitializing(false); // Stop the loading state when stream is ready
     } else {
       console.error("Stream is not available");
+      setIsInitializing(false); // Also stop loading on error
     }
   }
 
@@ -75,6 +87,10 @@ export default function ChatInterface() {
 
   async function terminateAvatarSession() {
     if (!avatar) return;
+
+    // Remove event listeners
+    avatar.off(StreamingEvents.AVATAR_START_TALKING, handleAvatarStartTalking);
+
     await avatar.stopAvatar();
     const videoElement = document.getElementById("avatarVideo") as HTMLVideoElement;
     if (videoElement) {
@@ -82,12 +98,17 @@ export default function ChatInterface() {
     }
     setAvatar(null);
     setSessionData(null);
+    setIsProcessing(false); // Reset processing state
   }
 
   const handleSubmit = async(e: React.FormEvent) => {
     e.preventDefault()
-    if (avatar && input.trim()) {
+    if (avatar && input.trim() && !isProcessing) {
       try {
+        setIsProcessing(true)
+        setInput("") // Clear input after successful processing
+        // Note: We don't set isProcessing to false here anymore
+        // It will be set to false when the avatar starts talking
         const response = await fetch("/api", {
           method: "POST",
           body: JSON.stringify({ query: input }),
@@ -102,9 +123,8 @@ export default function ChatInterface() {
       }
       catch (error) {
         console.error("Error getting response:", error)
+        setIsProcessing(false) // Reset processing state on error
       }
-      
-      setInput("")
     }
   }
 
@@ -138,14 +158,21 @@ export default function ChatInterface() {
                 type="button"
                 variant={avatar ? "outline" : "default"}
                 onClick={initializeAvatarSession}
-                disabled={avatar !== null}
+                disabled={avatar !== null || isInitializing}
                 className={`font-inter text-sm ${
                   !avatar
                     ? "bg-[#92278F] hover:bg-[#7a1f78] text-white"
                     : "border-[#92278F] text-[#92278F] hover:bg-[#92278F] hover:text-white"
                 }`}
               >
-                Start Session
+                {isInitializing ? (
+                  <div className="flex items-center">
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    Initializing...
+                  </div>
+                ) : (
+                  'Start Session'
+                )}
               </Button>
               <Button
                 type="button"
@@ -172,9 +199,13 @@ export default function ChatInterface() {
               <Button
                 type="submit"
                 className="bg-[#92278F] hover:bg-[#7a1f78] text-white px-6"
-                disabled={!input.trim() || !avatar}
+                disabled={!input.trim() || !avatar || isProcessing}
               >
-                <Send className="w-4 h-4" />
+                {isProcessing ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
               </Button>
             </form>
           </div>
