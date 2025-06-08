@@ -1,79 +1,111 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Send, User, Bot } from "lucide-react"
-
-interface Message {
-  id: string
-  content: string
-  sender: "user" | "other"
-  timestamp: Date
-}
+import { Send } from "lucide-react"
+import StreamingAvatar, {
+  AvatarQuality,
+  StreamingEvents,
+  TaskType
+} from "@heygen/streaming-avatar";
 
 export default function ChatInterface() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      content: "Hey there! How are you doing today?",
-      sender: "other",
-      timestamp: new Date(Date.now() - 300000),
-    },
-    {
-      id: "2",
-      content: "I'm doing great, thanks for asking! Just working on some new projects.",
-      sender: "user",
-      timestamp: new Date(Date.now() - 240000),
-    },
-    {
-      id: "3",
-      content: "That sounds exciting! What kind of projects are you working on?",
-      sender: "other",
-      timestamp: new Date(Date.now() - 180000),
-    },
-  ])
   const [input, setInput] = useState("")
-  const [currentSender, setCurrentSender] = useState<"user" | "other">("user")
+  const [avatar, setAvatar] = useState<StreamingAvatar | null>(null)
+  const [sessionData, setSessionData] = useState<any>(null)
+
+  // Initialize streaming avatar session
+  async function initializeAvatarSession() {
+    try {
+      const apiKey = process.env.NEXT_PUBLIC_HEYGEN_API_KEY;
+      const response = await fetch(
+        "https://api.heygen.com/v1/streaming.create_token",
+        {
+          method: "POST",
+          headers: { "x-api-key": apiKey || "" },
+        }
+      );
+      const { data } = await response.json();
+      const token = data.token;
+
+      const newAvatar = new StreamingAvatar({ token });
+
+      newAvatar.on(StreamingEvents.STREAM_READY, handleStreamReady);
+      newAvatar.on(StreamingEvents.STREAM_DISCONNECTED, handleStreamDisconnected);
+
+      const newSessionData = await newAvatar.createStartAvatar({
+        quality: AvatarQuality.Medium,
+        avatarName: "Alessandra_Grey_Sweater_public",
+      });
+
+      setAvatar(newAvatar);
+      setSessionData(newSessionData);
+      console.log("Session data:", newSessionData);
+
+    } catch (error) {
+      console.error("Failed to initialize avatar session:", error);
+    }
+  }
+
+  // Handle when avatar stream is ready
+  function handleStreamReady(event: any) {
+    const videoElement = document.getElementById("avatarVideo") as HTMLVideoElement;
+    if (event.detail && videoElement) {
+      videoElement.srcObject = event.detail;
+      videoElement.onloadedmetadata = () => {
+        videoElement.play().catch(console.error);
+      };
+    } else {
+      console.error("Stream is not available");
+    }
+  }
+
+  function handleStreamDisconnected() {
+    console.log("Stream disconnected");
+    const videoElement = document.getElementById("avatarVideo") as HTMLVideoElement;
+    if (videoElement) {
+      videoElement.srcObject = null;
+    }
+    setAvatar(null);
+    setSessionData(null);
+  }
+
+  async function terminateAvatarSession() {
+    if (!avatar) return;
+    await avatar.stopAvatar();
+    const videoElement = document.getElementById("avatarVideo") as HTMLVideoElement;
+    if (videoElement) {
+      videoElement.srcObject = null;
+    }
+    setAvatar(null);
+    setSessionData(null);
+  }
 
   const handleSubmit = async(e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim()) return
-
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      content: input,
-      sender: currentSender,
-      timestamp: new Date(),
+    if (avatar && input.trim()) {
+      try {
+        const response = await fetch("/api", {
+          method: "POST",
+          body: JSON.stringify({ query: input }),
+        })
+        const data = await response.json()
+        // Make the avatar speak the response
+        await avatar.speak({
+          text: data.message.content,
+          taskType: TaskType.REPEAT,
+        });
+        console.log(data)
+      }
+      catch (error) {
+        console.error("Error getting response:", error)
+      }
+      
+      setInput("")
     }
-
-    setMessages((prev) => [...prev, newMessage])
-    setInput("")
-
-    const response = await fetch("/api", {
-      method: "POST",
-      body: JSON.stringify({ query: input }),
-    })
-
-    const data = await response.json()
-    console.log(data)
-    setMessages((prev) => [...prev, {
-      id: Date.now().toString(),
-      content: data.message.content,
-      sender: currentSender === "user" ? "other" : "user",
-      timestamp: new Date(),
-    }])
-  }
-
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-    })
   }
 
   return (
@@ -91,40 +123,12 @@ export default function ChatInterface() {
         </CardHeader>
 
         <CardContent className="flex-1 overflow-y-auto p-6 space-y-4">
-          {messages.map((message, index) => (
-            <div
-              key={message.id}
-              className={`flex items-start space-x-3 animate-in slide-in-from-bottom-2 duration-300`}
-              style={{ animationDelay: `${index * 100}ms` }}
-            >
-              {message.sender === "other" && (
-                <div className="w-8 h-8 rounded-full bg-[#92278F] flex items-center justify-center flex-shrink-0">
-                  <User className="w-4 h-4 text-white" />
-                </div>
-              )}
-
-              <div
-                className={`flex flex-col ${message.sender === "user" ? "ml-auto items-end" : "items-start"} max-w-[70%]`}
-              >
-                <div
-                  className={`px-4 py-3 rounded-2xl ${
-                    message.sender === "user"
-                      ? "bg-[#92278F] text-white rounded-br-md"
-                      : "bg-gray-100 text-black rounded-bl-md border border-gray-200"
-                  } shadow-sm`}
-                >
-                  <p className="font-inter text-sm leading-relaxed">{message.content}</p>
-                </div>
-                <span className="text-xs text-gray-500 mt-1 font-inter">{formatTime(message.timestamp)}</span>
-              </div>
-
-              {message.sender === "user" && (
-                <div className="w-8 h-8 rounded-full bg-black flex items-center justify-center flex-shrink-0">
-                  <Bot className="w-4 h-4 text-white" />
-                </div>
-              )}
-            </div>
-          ))}
+          <div className="flex justify-center mb-4">
+            <video 
+              id="avatarVideo" 
+              className={`w-full h-full object-cover ${!avatar ? 'hidden' : ''}`}
+            />
+          </div>
         </CardContent>
 
         <CardFooter className="p-6 border-t border-gray-100">
@@ -132,27 +136,29 @@ export default function ChatInterface() {
             <div className="flex space-x-2">
               <Button
                 type="button"
-                variant={currentSender === "user" ? "default" : "outline"}
-                onClick={() => setCurrentSender("user")}
+                variant={avatar ? "outline" : "default"}
+                onClick={initializeAvatarSession}
+                disabled={avatar !== null}
                 className={`font-inter text-sm ${
-                  currentSender === "user"
+                  !avatar
                     ? "bg-[#92278F] hover:bg-[#7a1f78] text-white"
                     : "border-[#92278F] text-[#92278F] hover:bg-[#92278F] hover:text-white"
                 }`}
               >
-                Send as User
+                Start Session
               </Button>
               <Button
                 type="button"
-                variant={currentSender === "other" ? "default" : "outline"}
-                onClick={() => setCurrentSender("other")}
+                variant={avatar ? "default" : "outline"}
+                onClick={terminateAvatarSession}
+                disabled={avatar === null}
                 className={`font-inter text-sm ${
-                  currentSender === "other"
+                  avatar
                     ? "bg-black hover:bg-gray-800 text-white"
                     : "border-black text-black hover:bg-black hover:text-white"
                 }`}
               >
-                Send as Other
+                End Session
               </Button>
             </div>
 
@@ -166,7 +172,7 @@ export default function ChatInterface() {
               <Button
                 type="submit"
                 className="bg-[#92278F] hover:bg-[#7a1f78] text-white px-6"
-                disabled={!input.trim()}
+                disabled={!input.trim() || !avatar}
               >
                 <Send className="w-4 h-4" />
               </Button>
