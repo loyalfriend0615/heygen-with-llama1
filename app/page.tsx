@@ -39,7 +39,7 @@ export default function ChatInterface() {
   const [input, setInput] = useState("")
   const [currentSender, setCurrentSender] = useState<"user" | "other">("user")
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async(e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim()) return
 
@@ -52,6 +52,20 @@ export default function ChatInterface() {
 
     setMessages((prev) => [...prev, newMessage])
     setInput("")
+
+    const response = await fetch("/api", {
+      method: "POST",
+      body: JSON.stringify({ query: input }),
+    })
+
+    const data = await response.json()
+    console.log(data)
+    setMessages((prev) => [...prev, {
+      id: Date.now().toString(),
+      content: data.message.content,
+      sender: currentSender === "user" ? "other" : "user",
+      timestamp: new Date(),
+    }])
   }
 
   const formatTime = (date: Date) => {
